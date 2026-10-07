@@ -1,0 +1,12 @@
+{
+  "name": "wareef-hub",
+  "version": "0.1.0",
+  "description": "صفحة منظومة وريف: كل أنظمة وريف في مكان واحد",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}
