@@ -1,24 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { handle, hubUrls } from '../src/server.js';
+import { handle, publicConfig } from '../src/server.js';
 
-test('only http(s) *_URL variables reach the page', () => {
-  assert.deepEqual(hubUrls({ TEAM_URL: 'https://team.example', SECRET: 'x', BAD_URL: 'javascript:alert(1)', PORT: '3000' }), { TEAM_URL: 'https://team.example' });
+test('only safe settings reach the page', () => {
+  assert.deepEqual(publicConfig({
+    AZWO_URL: 'https://azwo.example', THEME_URL: 'javascript:alert(1)', SECRET_KEY: 'x', INTERNAL_API_URL: 'https://internal.example',
+    CONTACT_EMAIL: 'hello@arso.sa', CONTACT_WHATSAPP: '+966 50 000 0000',
+  }), { AZWO_URL: 'https://azwo.example', CONTACT_EMAIL: 'hello@arso.sa', CONTACT_WHATSAPP: '+966 50 000 0000' });
+  assert.deepEqual(publicConfig({ CONTACT_EMAIL: 'not an email', CONTACT_WHATSAPP: '<script>' }), {});
 });
 
-test('serves the page, config and health', async () => {
-  process.env.TEAM_URL = 'https://team.example';
+test('serves the page, config, favicon and health', async () => {
+  process.env.AZWO_URL = 'https://azwo.example';
   const server = createServer(handle);
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    const page = await fetch(base + '/');
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /منظومة وريف/);
-    assert.match(await (await fetch(base + '/config.js')).text(), /team\.example/);
+    const page = await (await fetch(base + '/')).text();
+    assert.match(page, /أرسو/);
+    assert.match(page, /symbol id="arso"/);
+    assert.match(await (await fetch(base + '/config.js')).text(), /window\.ARSO = .*azwo\.example/);
+    assert.equal((await fetch(base + '/favicon.ico')).headers.get('content-type'), 'image/x-icon');
     assert.equal((await fetch(base + '/health')).status, 200);
-    assert.equal((await fetch(base + '/apps.js')).headers.get('content-type'), 'text/javascript; charset=utf-8');
     assert.equal((await fetch(base + '/../src/server.js')).headers.get('content-type'), 'text/html; charset=utf-8');
   } finally {
     server.close();

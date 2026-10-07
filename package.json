@@ -1,7 +1,7 @@
 {
-  "name": "wareef-hub",
+  "name": "arso-site",
   "version": "0.1.0",
-  "description": "صفحة منظومة وريف: كل أنظمة وريف في مكان واحد",
+  "description": "موقع أرسو ARSO: تقنيات تُرسي نمو المتاجر",
   "type": "module",
   "private": true,
   "engines": { "node": ">=20" },
