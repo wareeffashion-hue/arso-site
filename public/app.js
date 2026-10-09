@@ -8,7 +8,7 @@
   // ------------------------------------------------------------ progress
   // يُحفظ تقدّم المتعلم في متصفحه فقط. إذا تعذّر التخزين تعمل الصفحة بلا حفظ.
   const KEY = 'arso-course-v1';
-  let state = { done: {}, quiz: {}, path: '' };
+  let state = { done: {}, quiz: {}, path: '', name: '', sound: true };
   try { state = { ...state, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 
@@ -40,17 +40,49 @@
   }
   const codeBox = text => `<div class="code"><button class="copy" type="button">نسخ</button><pre dir="auto"><code>${esc(text)}</code></pre></div>`;
 
+  // ------------------------------------------------------------ narration (browser text-to-speech)
+  // التعليق الصوتي من أصوات المتصفح العربية. إذا لم يتوفر صوت عربي يُعطَّل الزر.
+  const speech = 'speechSynthesis' in window ? window.speechSynthesis : null;
+  let arabicVoice = null;
+  function pickVoice() {
+    if (!speech) return;
+    const voices = speech.getVoices().filter(v => /^ar/i.test(v.lang));
+    arabicVoice = voices.find(v => /SA|sa/.test(v.lang)) || voices[0] || null;
+    document.querySelectorAll('.pl-sound').forEach(updateSoundButton);
+  }
+  if (speech) { pickVoice(); speech.addEventListener?.('voiceschanged', pickVoice); }
+  function updateSoundButton(btn) {
+    const ok = !!arabicVoice;
+    btn.disabled = !ok;
+    btn.classList.toggle('on', ok && state.sound !== false);
+    btn.setAttribute('aria-pressed', String(ok && state.sound !== false));
+    btn.title = ok ? (state.sound !== false ? 'إيقاف التعليق الصوتي' : 'تشغيل التعليق الصوتي') : 'لا يتوفر صوت عربي في هذا المتصفح';
+    btn.querySelector('span').textContent = ok ? (state.sound !== false ? 'الصوت مفعّل' : 'الصوت متوقف') : 'لا يوجد صوت عربي';
+  }
+  const narrationOn = () => !!arabicVoice && state.sound !== false;
+  const plain = html => { const d = document.createElement('div'); d.innerHTML = html.replace(/<br\s*\/?>/g, ' '); return d.textContent.replace(/<[^>]+>/g, ' ').replace(/[—–]/g, '،').replace(/\s+/g, ' ').trim(); };
+  function sceneScript(s) {
+    const parts = [];
+    if (s.type === 'stat') parts.push(`${s.value}، ${s.label}`);
+    else parts.push(plain(s.title || ''));
+    if (s.items) parts.push(s.items.map(plain).join('، '));
+    if (s.type === 'compare') parts.push(`قبل: ${s.before}. بعد: ${s.after}`);
+    if (s.caption) parts.push(s.caption);
+    return parts.filter(Boolean).join('. ');
+  }
+
   // ------------------------------------------------------------ motion lesson player
   function motionPlayer(id, title) {
     const scenes = (M.units[id] || {}).scenes || [];
     if (!scenes.length) return '';
     return `<section class="player" data-unit="${id}" aria-label="درس متحرك: ${esc(title)}">
       <div class="player-stage" aria-live="polite"></div>
-      <div class="player-poster"><button class="player-start" type="button"><i aria-hidden="true">▶</i><span>شاهد الدرس المتحرك</span><small>${scenes.length} مشاهد · ${Math.round(scenes.reduce((t, s) => t + sceneDuration(s), 0) / 1000)} ثانية</small></button></div>
+      <div class="player-poster"><button class="player-start" type="button"><i aria-hidden="true">▶</i><span>شاهد الدرس المتحرك</span><small>${scenes.length} مشاهد · ${Math.round(scenes.reduce((t, s) => t + sceneDuration(s), 0) / 1000)} ثانية · بتعليق صوتي</small></button></div>
       <div class="player-bar">
         <button class="pl-toggle" type="button" aria-label="تشغيل">▶</button>
         <div class="pl-segments">${scenes.map((_, i) => `<button type="button" class="pl-seg" data-i="${i}" aria-label="المشهد ${i + 1}"><span></span></button>`).join('')}</div>
         <span class="pl-count">01 / ${pad(scenes.length)}</span>
+        <button class="pl-sound" type="button" aria-pressed="false"><i aria-hidden="true"></i><span>الصوت</span></button>
       </div>
       <p class="player-caption"></p>
     </section>`;
@@ -75,10 +107,11 @@
     const stage = root.querySelector('.player-stage');
     const caption = root.querySelector('.player-caption');
     const toggle = root.querySelector('.pl-toggle');
+    const sound = root.querySelector('.pl-sound');
     const segs = [...root.querySelectorAll('.pl-seg')];
     const count = root.querySelector('.pl-count');
-    let i = 0, playing = false, timer = 0, started = 0, duration = 0, raf = 0;
-
+    // كل مشهد ينتظر انتهاء الحركة وانتهاء التعليق الصوتي معاً قبل الانتقال.
+    let i = 0, playing = false, timer = 0, started = 0, duration = 0, raf = 0, token = 0, visualDone = false, voiceDone = true;
 
     function show(n) {
       i = n;
@@ -90,27 +123,48 @@
       const parts = stage.querySelectorAll('.anim');
       parts.forEach((el, k) => { el.style.transitionDelay = reduced.matches ? '0ms' : `${120 + k * 420}ms`; });
       requestAnimationFrame(() => requestAnimationFrame(() => parts.forEach(el => el.classList.add('in'))));
-      duration = sceneDuration(s);
       if (playing) schedule();
+    }
+    function advance() {
+      if (!playing || !visualDone || !voiceDone) return;
+      if (i < scenes.length - 1) show(i + 1); else finish();
+    }
+    function speak() {
+      voiceDone = true;
+      if (!narrationOn()) return;
+      speech.cancel();
+      const u = new SpeechSynthesisUtterance(sceneScript(scenes[i]));
+      u.voice = arabicVoice; u.lang = arabicVoice.lang; u.rate = 0.95;
+      const mine = token;
+      voiceDone = false;
+      u.onend = u.onerror = () => { if (mine !== token) return; voiceDone = true; timer = setTimeout(advance, 450); };
+      speech.speak(u);
     }
     function schedule() {
       clearTimeout(timer); cancelAnimationFrame(raf);
+      token++;
+      const s = scenes[i];
+      duration = narrationOn() ? Math.max(sceneDuration(s), sceneScript(s).length * 75) : sceneDuration(s);
       started = performance.now();
+      visualDone = false;
       const tick = now => {
         const p = Math.min(1, (now - started) / duration);
         segs[i].firstElementChild.style.width = `${p * 100}%`;
         if (p < 1 && playing) raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
-      timer = setTimeout(() => { if (i < scenes.length - 1) show(i + 1); else finish(); }, duration);
+      const mine = token;
+      setTimeout(() => { if (mine !== token) return; visualDone = true; advance(); }, sceneDuration(s));
+      speak();
     }
     function play() {
       playing = true; root.classList.add('playing'); toggle.textContent = '❚❚'; toggle.setAttribute('aria-label', 'إيقاف مؤقت');
       if (root.classList.contains('ended')) { root.classList.remove('ended'); show(0); } else schedule();
     }
     function pause() {
-      playing = false; root.classList.remove('playing'); toggle.textContent = '▶'; toggle.setAttribute('aria-label', 'تشغيل');
+      playing = false; token++; root.classList.remove('playing'); toggle.textContent = '▶'; toggle.setAttribute('aria-label', 'تشغيل');
       clearTimeout(timer); cancelAnimationFrame(raf);
+      if (speech) speech.cancel();
     }
     function finish() {
       pause(); root.classList.add('ended'); toggle.textContent = '↻'; toggle.setAttribute('aria-label', 'إعادة التشغيل');
@@ -121,7 +175,13 @@
       if (!root.classList.contains('started')) { root.classList.add('started'); show(0); play(); return; }
       playing ? pause() : play();
     });
-    segs.forEach(seg => seg.addEventListener('click', () => { root.classList.add('started'); root.classList.remove('ended'); show(Number(seg.dataset.i)); if (!playing) play(); }));
+    sound.addEventListener('click', () => {
+      state.sound = state.sound === false; save();
+      document.querySelectorAll('.pl-sound').forEach(updateSoundButton);
+      if (playing) schedule(); else if (speech) speech.cancel();
+    });
+    updateSoundButton(sound);
+    segs.forEach(seg => seg.addEventListener('click', () => { root.classList.add('started'); root.classList.remove('ended'); if (!playing) { playing = true; root.classList.add('playing'); toggle.textContent = '❚❚'; } show(Number(seg.dataset.i)); }));
     root.addEventListener('keydown', e => {
       if (e.key === 'ArrowLeft' && i < scenes.length - 1) show(i + 1);
       if (e.key === 'ArrowRight' && i > 0) show(i - 1);
@@ -159,7 +219,7 @@
     const current = M.paths.find(p => p.id === state.path);
     const next = current && current.units.find(id => !state.done[id]);
     return `
-      ${current ? `<section class="resume reveal"><div><small>مسارك الحالي</small><h3>${esc(current.title)}</h3><div class="meter"><span data-p="${pathProgress(current) / current.units.length}"></span></div><p>${pathProgress(current)} من ${current.units.length} مكتملة</p></div>${next ? `<a class="circle-link" href="${itemHref(next)}"><span>تابع: ${esc(itemTitle(next))}</span><i aria-hidden="true">↖</i></a>` : '<p class="gold">أكملت هذا المسار.</p>'}</section>` : ''}
+      ${current ? `<section class="resume reveal"><div><small>مسارك الحالي</small><h3>${esc(current.title)}</h3><div class="meter"><span data-p="${pathProgress(current) / current.units.length}"></span></div><p>${pathProgress(current)} من ${current.units.length} مكتملة</p></div>${next ? `<a class="circle-link" href="${itemHref(next)}"><span>تابع: ${esc(itemTitle(next))}</span><i aria-hidden="true">↖</i></a>` : '<a class="circle-link" href="#/certificate"><span>أكملت المسار. احصل على شهادتك</span><i aria-hidden="true">↖</i></a>'}</section>` : ''}
       <section class="method" id="method"><div class="section-meta reveal"><span>01 / طريقة التعلّم</span><small>HOW YOU LEARN</small></div>
         <h2 class="reveal">كل وحدة،<br><em>خمس خطوات.</em></h2>
         <ol class="method-steps">${M.method.map((m, k) => `<li class="reveal"><b>${pad(k + 1)}</b><h3>${m[0]}</h3><p>${m[1]}</p></li>`).join('')}</ol>
@@ -174,7 +234,8 @@
           <a class="unit-row reveal${state.done.project ? ' done' : ''}" href="#/project"><b>★</b><div><small>تطبيق</small><h3>${esc(C.project.title)}</h3><p>مساعدة خدمة عملاء تجمع كل الوحدات.</p></div><span class="row-state">${state.done.project ? '✓' : '↖'}</span></a>
         </div>
       </section>
-      <section class="library-teaser reveal"><div class="section-meta"><span>04 / المكتبة</span><small>PROMPT LIBRARY</small></div><h2>${C.library.length} برومبتات<br><em>جاهزة للنسخ.</em></h2><a class="circle-link" href="#/library"><span>افتح المكتبة</span><i aria-hidden="true">↖</i></a></section>`;
+      <section class="library-teaser reveal"><div class="section-meta"><span>04 / المكتبة</span><small>PROMPT LIBRARY</small></div><h2>${C.library.length} برومبتات<br><em>جاهزة للنسخ.</em></h2><a class="circle-link" href="#/library"><span>افتح المكتبة</span><i aria-hidden="true">↖</i></a></section>
+      <section class="cert-teaser reveal"><div class="section-meta"><span>05 / الشهادة</span><small>CERTIFICATE OF COMPLETION</small></div><h2>أكمل مسارك.<br><em>واحصل على شهادتك.</em></h2><a class="circle-link" href="#/certificate"><span>${completedPaths().length ? 'شهادتك جاهزة' : 'كيف أحصل عليها'}</span><i aria-hidden="true">↖</i></a></section>`;
   }
 
   function pathView(id) {
@@ -185,7 +246,7 @@
       <h1>${esc(p.title)}</h1><p class="lead">${esc(p.desc)}</p>
       <div class="path-meta big"><span>${p.units.length} محطات</span><span>${p.hours} ساعات تقريباً</span><span>${pathProgress(p)} مكتملة</span></div>
       <div class="meter"><span data-p="${pathProgress(p) / p.units.length}"></span></div>
-      <div class="head-actions">${state.path === p.id ? '<span class="gold">هذا مسارك الحالي</span>' : `<button class="large-cta choose-path" data-path="${p.id}" type="button"><span>اعتمد هذا المسار</span><i aria-hidden="true">↖</i></button>`}${next ? `<a class="circle-link" href="${itemHref(next)}"><span>${pathProgress(p) ? 'تابع' : 'ابدأ'}: ${esc(itemTitle(next))}</span><i aria-hidden="true">↖</i></a>` : ''}</div></section>
+      <div class="head-actions">${state.path === p.id ? '<span class="gold">هذا مسارك الحالي</span>' : `<button class="large-cta choose-path" data-path="${p.id}" type="button"><span>اعتمد هذا المسار</span><i aria-hidden="true">↖</i></button>`}${next ? `<a class="circle-link" href="${itemHref(next)}"><span>${pathProgress(p) ? 'تابع' : 'ابدأ'}: ${esc(itemTitle(next))}</span><i aria-hidden="true">↖</i></a>` : '<a class="circle-link" href="#/certificate"><span>احصل على شهادتك</span><i aria-hidden="true">↖</i></a>'}</div></section>
       <ol class="timeline">${p.units.map((u, k) => `<li class="${state.done[u] ? 'done' : u === next ? 'next' : ''}"><span class="dot" aria-hidden="true"></span><a href="${itemHref(u)}"><small>المحطة ${pad(k + 1)}${u === next ? ' · التالية' : ''}${state.done[u] ? ' · مكتملة' : ''}</small><h3>${itemNo(u)} — ${esc(itemTitle(u))}</h3></a></li>`).join('')}</ol>`;
   }
 
@@ -233,6 +294,124 @@
       <p>تفاصيل محاضرة The prompting playbook مأخوذة من ملخصات منشورة عنها لا من نص الفيديو. الأسعار والنماذج والميزات تتغير، فراجعها في التوثيق الرسمي. دورة مستقلة من أرسو، وليست صادرة عن Anthropic.</p></section>`;
   }
 
+  // ------------------------------------------------------------ certificate
+  const completedPaths = () => M.paths.filter(p => p.units.every(id => state.done[id]));
+  const certDate = new Intl.DateTimeFormat('ar-u-ca-gregory-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  function certificateView() {
+    const done = completedPaths();
+    if (!done.length) {
+      return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>الشهادة</span><small>CERTIFICATE</small></div>
+        <h1>شهادتك<br><em>تنتظرك.</em></h1><p class="lead">أكمل كل محطات أي مسار لتحصل على شهادة إتمام من أكاديمية أرسو باسمك.</p></section>
+        <ol class="timeline">${M.paths.map(p => `<li class="${pathProgress(p) ? 'next' : ''}"><span class="dot" aria-hidden="true"></span><a href="#/path/${p.id}"><small>${pathProgress(p)} من ${p.units.length} مكتملة</small><h3>${esc(p.title)}</h3></a></li>`).join('')}</ol>`;
+    }
+    const chosen = done.find(p => p.id === state.path) || done[done.length - 1];
+    return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>الشهادة</span><small>CERTIFICATE OF COMPLETION</small></div>
+      <h1>أحسنت.<br><em>هذه شهادتك.</em></h1><p class="lead">اكتب اسمك كما تريده أن يظهر، ثم حمّل الشهادة صورة أو اطبعها PDF.</p></section>
+      <section class="cert-form">
+        <label>الاسم على الشهادة<input id="cert-name" maxlength="60" autocomplete="name" placeholder="اكتب اسمك الكامل" value="${esc(state.name || '')}"></label>
+        ${done.length > 1 ? `<label>المسار<select id="cert-path">${done.map(p => `<option value="${p.id}"${p.id === chosen.id ? ' selected' : ''}>${esc(p.title)}</option>`).join('')}</select></label>` : `<input type="hidden" id="cert-path" value="${chosen.id}">`}
+      </section>
+      <section class="cert-preview"><canvas id="cert-canvas" width="2000" height="1414" aria-label="معاينة الشهادة"></canvas></section>
+      <section class="finish cert-actions"><button class="large-cta" id="cert-download" type="button"><span>تحميل الشهادة (PNG)</span><i aria-hidden="true">↓</i></button><button class="circle-link" id="cert-print" type="button"><span>طباعة أو حفظ PDF</span><i aria-hidden="true">⎙</i></button></section>
+      <div class="print-sheet" aria-hidden="true"></div>`;
+  }
+
+  let symbolImg;
+  const loadSymbol = () => symbolImg || (symbolImg = new Promise(res => { const img = new Image(); img.onload = () => res(img); img.onerror = () => res(null); img.src = 'assets/symbol.svg'; }));
+
+  async function drawCertificate(canvas, { name, path, date }) {
+    await Promise.all([document.fonts.load('400 60px Gamila'), document.fonts.load('700 60px Gamila')]).catch(() => {});
+    const img = await loadSymbol();
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height, cx = W / 2;
+    const gold = '#c6a76a', paper = '#eeeae0', muted = '#8b8b82';
+    const font = (w, s) => `${w} ${s}px Gamila, Arial, sans-serif`;
+    const spaced = (text, x, y, size, color, spacing) => { ctx.save(); ctx.direction = 'ltr'; ctx.font = `${size}px Arial`; ctx.fillStyle = color; if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`; ctx.textAlign = 'center'; ctx.fillText(text, x, y); ctx.restore(); };
+
+    ctx.fillStyle = '#090909'; ctx.fillRect(0, 0, W, H);
+    const glow = ctx.createRadialGradient(cx, 380, 40, cx, 380, 900);
+    glow.addColorStop(0, '#c6a76a24'); glow.addColorStop(1, '#09090900');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = gold; ctx.lineWidth = 3; ctx.strokeRect(60, 60, W - 120, H - 120);
+    ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1.5; ctx.strokeRect(84, 84, W - 168, H - 168);
+    ctx.fillStyle = '#55594f'; ctx.font = '34px Arial'; ctx.textAlign = 'center';
+    [[130, 140], [W - 130, 140], [130, H - 120], [W - 130, H - 120]].forEach(([x, y]) => ctx.fillText('+', x, y));
+    [[112, -1, 'ARSO — ACADEMY'], [W - 112, 1, 'WATCH / READ / BUILD']].forEach(([x, dir, t]) => { ctx.save(); ctx.translate(x, H / 2); ctx.rotate(dir * Math.PI / 2); spaced(t, 0, 6, 16, '#595d59', 6); ctx.restore(); });
+
+    if (img) ctx.drawImage(img, cx - 70, 150, 140, 140);
+    spaced('A R S O', cx, 340, 30, paper, 10);
+    spaced('THE ARSO ACADEMY · CERTIFICATE OF COMPLETION', cx, 400, 20, gold, 6);
+
+    ctx.direction = 'rtl'; ctx.textAlign = 'center';
+    ctx.fillStyle = paper; ctx.font = font(400, 128); ctx.fillText('شهادة إتمام', cx, 560);
+    ctx.fillStyle = muted; ctx.font = font(400, 40); ctx.fillText('تُمنح هذه الشهادة إلى', cx, 655);
+
+    let size = 112;
+    ctx.font = font(700, size);
+    while (ctx.measureText(name).width > 1400 && size > 54) { size -= 4; ctx.font = font(700, size); }
+    ctx.fillStyle = gold; ctx.fillText(name, cx, 800);
+    const lineW = Math.min(1500, Math.max(520, ctx.measureText(name).width + 160));
+    ctx.strokeStyle = '#c6a76a80'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx - lineW / 2, 850); ctx.lineTo(cx + lineW / 2, 850); ctx.stroke();
+
+    ctx.fillStyle = paper; ctx.font = font(400, 46); ctx.fillText(`لإتمام «${path.title}» في دورة أسرار Claude`, cx, 945);
+    ctx.fillStyle = muted; ctx.font = font(400, 32); ctx.fillText(`${path.units.length} محطات تعليمية، ونحو ${path.hours} ساعات من الدروس المتحركة والقراءة والتطبيق`, cx, 1010);
+
+    // التاريخ يميناً، والختم في الوسط، والتوقيع يساراً.
+    const by = 1200;
+    ctx.fillStyle = muted; ctx.font = font(400, 26); ctx.fillText('تاريخ الإتمام', 1560, by - 52);
+    ctx.fillStyle = paper; ctx.font = font(400, 38); ctx.fillText(certDate.format(date), 1560, by);
+    ctx.fillStyle = muted; ctx.font = font(400, 26); ctx.fillText('أكاديمية أرسو', 440, by - 52);
+    ctx.fillStyle = paper; ctx.font = font(700, 44); ctx.fillText('أرسو', 440, by);
+    ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1.5;
+    [[1560], [440]].forEach(([x]) => { ctx.beginPath(); ctx.moveTo(x - 190, by + 30); ctx.lineTo(x + 190, by + 30); ctx.stroke(); });
+
+    ctx.strokeStyle = gold; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cx, by - 30, 92, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#c6a76a60'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, by - 30, 78, 0, Math.PI * 2); ctx.stroke();
+    if (img) ctx.drawImage(img, cx - 36, by - 92, 72, 72);
+    spaced('CERTIFIED', cx, by + 14, 12, gold, 4);
+
+    ctx.direction = 'rtl'; ctx.fillStyle = '#6b6b64'; ctx.font = font(400, 22);
+    ctx.fillText('دورة مستقلة من أرسو، وليست صادرة عن Anthropic.', cx, H - 110);
+  }
+
+  function initCertificate() {
+    const canvas = view.querySelector('#cert-canvas');
+    if (!canvas) return;
+    const nameInput = view.querySelector('#cert-name');
+    const pathInput = view.querySelector('#cert-path');
+    state.cert = state.cert || {};
+    const current = () => {
+      const path = M.paths.find(p => p.id === pathInput.value);
+      if (!state.cert[path.id]) { state.cert[path.id] = new Date().toISOString(); save(); }
+      return { name: nameInput.value.trim() || 'اسم المتدرب', path, date: new Date(state.cert[path.id]) };
+    };
+    const redraw = () => drawCertificate(canvas, current());
+    nameInput.addEventListener('input', () => { state.name = nameInput.value.trim(); save(); redraw(); });
+    pathInput.addEventListener('change', redraw);
+    view.querySelector('#cert-download').addEventListener('click', async () => {
+      if (!nameInput.value.trim()) { nameInput.focus(); nameInput.setAttribute('aria-invalid', 'true'); return; }
+      nameInput.removeAttribute('aria-invalid');
+      await redraw();
+      canvas.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `ARSO-Certificate-${current().path.id}.png`;
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }, 'image/png');
+    });
+    view.querySelector('#cert-print').addEventListener('click', async () => {
+      if (!nameInput.value.trim()) { nameInput.focus(); nameInput.setAttribute('aria-invalid', 'true'); return; }
+      await redraw();
+      const sheet = view.querySelector('.print-sheet');
+      sheet.innerHTML = `<img alt="" src="${canvas.toDataURL('image/png')}">`;
+      sheet.querySelector('img').decode().catch(() => {}).then(() => window.print());
+    });
+    redraw();
+  }
+
   const notFound = () => `<section class="page-head"><h1>الصفحة غير موجودة</h1><a class="circle-link" href="#/"><span>الرئيسية</span><i aria-hidden="true">↖</i></a></section>`;
 
   // ------------------------------------------------------------ router
@@ -242,12 +421,13 @@
     const isHome = !kind;
     hero.hidden = !isHome;
     document.body.classList.toggle('inner', !isHome);
-    view.innerHTML = isHome ? homeView() : kind === 'path' ? pathView(id) : kind === 'unit' ? unitView(id) : kind === 'project' ? projectView() : kind === 'library' ? libraryView() : notFound();
+    view.innerHTML = isHome ? homeView() : kind === 'path' ? pathView(id) : kind === 'unit' ? unitView(id) : kind === 'project' ? projectView() : kind === 'library' ? libraryView() : kind === 'certificate' ? certificateView() : notFound();
     const title = isHome ? '' : (view.querySelector('h1') || {}).textContent;
     document.title = title ? `${title} — أسرار Claude | أرسو` : 'أسرار Claude — دورة أرسو';
     view.querySelectorAll('[data-p]').forEach(el => el.style.setProperty('--p', el.dataset.p));
     view.querySelectorAll('.player').forEach(initPlayer);
     view.querySelectorAll('.quiz').forEach(initQuiz);
+    initCertificate();
     observeReveals();
     if (!isHome) { window.scrollTo(0, 0); view.querySelector('h1')?.setAttribute('tabindex', '-1'); view.querySelector('h1')?.focus({ preventScroll: true }); }
     closeMenu();
