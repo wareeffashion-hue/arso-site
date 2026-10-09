@@ -234,7 +234,9 @@
           <a class="unit-row reveal${state.done.project ? ' done' : ''}" href="#/project"><b>★</b><div><small>تطبيق</small><h3>${esc(C.project.title)}</h3><p>مساعدة خدمة عملاء تجمع كل الوحدات.</p></div><span class="row-state">${state.done.project ? '✓' : '↖'}</span></a>
         </div>
       </section>
-      <section class="library-teaser reveal"><div class="section-meta"><span>04 / المكتبة</span><small>PROMPT LIBRARY</small></div><h2>${C.library.length} برومبتات<br><em>جاهزة للنسخ.</em></h2><a class="circle-link" href="#/library"><span>افتح المكتبة</span><i aria-hidden="true">↖</i></a></section>
+      <section class="library-teaser reveal"><div class="section-meta"><span>04 / مكتبة الاحتراف</span><small>TOOLKITS</small></div><h2>أفضل الممارسات<br><em>وبرومبتات جاهزة.</em></h2>
+        <div class="kit-grid"><a class="kit-card" href="#/library/essentials"><small>ESSENTIALS</small><h3>برومبتات أساسية</h3><span>${C.library.length} برومبتات</span></a>${(window.ARSO_TOOLKITS || []).map(k => `<a class="kit-card" href="#/library/${k.id}"><small>${k.en}</small><h3>${esc(k.title)}</h3><span>${k.prompts.length} برومبتات · ${k.practices.length} ممارسات</span></a>`).join('')}</div>
+        <a class="circle-link" href="#/library"><span>افتح المكتبة كاملة</span><i aria-hidden="true">↖</i></a></section>
       <section class="cert-teaser reveal"><div class="section-meta"><span>05 / الشهادة</span><small>CERTIFICATE OF COMPLETION</small></div><h2>أكمل مسارك.<br><em>واحصل على شهادتك.</em></h2><a class="circle-link" href="#/certificate"><span>${completedPaths().length ? 'شهادتك جاهزة' : 'كيف أحصل عليها'}</span><i aria-hidden="true">↖</i></a></section>`;
   }
 
@@ -287,9 +289,16 @@
       <section class="finish"><button class="large-cta mark-done" data-id="project" type="button"><span>${state.done.project ? 'مكتمل ✓ — إلغاء' : 'أنهيت المشروع'}</span><i aria-hidden="true">✓</i></button><a class="circle-link" href="#/library"><span>مكتبة البرومبتات</span><i aria-hidden="true">↖</i></a></section></article>`;
   }
 
-  function libraryView() {
-    return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>المكتبة</span><small>PROMPT LIBRARY</small></div><h1>برومبتات<br><em>جاهزة للنسخ.</em></h1><p class="lead">انسخ البرومبت، واستبدل ما بين {{ }} ببياناتك.</p></section>
-      <div class="library">${C.library.map((l, k) => `<section class="lib-item"><b>${pad(k + 1)}</b><h3>${esc(l.title)}</h3><p>${esc(l.use)}</p>${codeBox(l.text)}</section>`).join('')}</div>
+  function libraryView(kitId) {
+    const kits = [{ id: 'essentials', title: 'برومبتات أساسية', en: 'ESSENTIALS', intro: 'برومبتات عامة لتحسين برومبتاتك وتحليل البيانات وكتابة المحتوى.', practices: [], prompts: C.library }, ...(window.ARSO_TOOLKITS || [])];
+    const kit = kits.find(k => k.id === kitId) || kits[0];
+    const total = kits.reduce((t, k) => t + k.prompts.length, 0);
+    return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>مكتبة الاحتراف</span><small>${kits.length} TOOLKITS · ${total} PROMPTS</small></div><h1>${esc(kit.title)}<br><em>باحتراف.</em></h1><p class="lead">${esc(kit.intro)}</p></section>
+      <nav class="kit-nav" aria-label="مجالات المكتبة">${kits.map(k => `<a href="#/library/${k.id}"${k.id === kit.id ? ' aria-current="page"' : ''}><small>${k.en}</small>${esc(k.title)}</a>`).join('')}</nav>
+      ${kit.practices.length ? `<section class="kit-practices"><div class="section-meta"><span>أفضل الممارسات</span><small>BEST PRACTICES</small></div><ol>${kit.practices.map(x => `<li><span>${x}</span></li>`).join('')}</ol></section>` : ''}
+      <div class="section-meta kit-prompts-meta"><span>برومبتات جاهزة للنسخ</span><small>${kit.prompts.length} PROMPTS</small></div>
+      <div class="library">${kit.prompts.map((l, k) => `<section class="lib-item"><b>${pad(k + 1)}</b><h3>${esc(l.title)}</h3><p>${esc(l.use)}</p>${codeBox(l.text)}</section>`).join('')}</div>
+      <p class="kit-note">استبدل ما بين {{ }} ببياناتك. البرومبتات التي تطلب «برومبتاً بالإنجليزية» تعطيك نصاً تلصقه في أداة توليد الصور أو الفيديو التي تستخدمها.</p>
       <section class="sources"><div class="section-meta"><span>المصادر</span><small>SOURCES</small></div><ul>${C.sources.map(s => `<li><a href="${s[1]}" target="_blank" rel="noopener">${esc(s[0])} ↗</a></li>`).join('')}</ul>
       <p>تفاصيل محاضرة The prompting playbook مأخوذة من ملخصات منشورة عنها لا من نص الفيديو. الأسعار والنماذج والميزات تتغير، فراجعها في التوثيق الرسمي. دورة مستقلة من أرسو، وليست صادرة عن Anthropic.</p></section>`;
   }
@@ -421,13 +430,15 @@
     const isHome = !kind;
     hero.hidden = !isHome;
     document.body.classList.toggle('inner', !isHome);
-    view.innerHTML = isHome ? homeView() : kind === 'path' ? pathView(id) : kind === 'unit' ? unitView(id) : kind === 'project' ? projectView() : kind === 'library' ? libraryView() : kind === 'certificate' ? certificateView() : notFound();
+    view.innerHTML = isHome ? homeView() : kind === 'path' ? pathView(id) : kind === 'unit' ? unitView(id) : kind === 'project' ? projectView() : kind === 'library' ? libraryView(id) : kind === 'certificate' ? certificateView() : notFound();
     const title = isHome ? '' : (view.querySelector('h1') || {}).textContent;
     document.title = title ? `${title} — أسرار Claude | أرسو` : 'أسرار Claude — دورة أرسو';
     view.querySelectorAll('[data-p]').forEach(el => el.style.setProperty('--p', el.dataset.p));
     view.querySelectorAll('.player').forEach(initPlayer);
     view.querySelectorAll('.quiz').forEach(initQuiz);
     initCertificate();
+    const chip = view.querySelector('.kit-nav [aria-current]');
+    if (chip) chip.parentElement.scrollLeft = chip.offsetLeft - (chip.parentElement.clientWidth - chip.offsetWidth) / 2;
     observeReveals();
     if (!isHome) { window.scrollTo(0, 0); view.querySelector('h1')?.setAttribute('tabindex', '-1'); view.querySelector('h1')?.focus({ preventScroll: true }); }
     closeMenu();
