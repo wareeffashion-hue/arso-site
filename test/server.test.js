@@ -19,7 +19,12 @@ test('serves the page, config, favicon and health', async () => {
   try {
     const page = await (await fetch(base + '/')).text();
     assert.match(page, /أرسو/);
-    assert.match(page, /symbol id="arso"/);
+    assert.match(page, /أسرار Claude/);
+    for (const [path, type] of [['/course.css', 'text/css'], ['/course-data.js', 'text/javascript'], ['/assets/logo-mesh.json', 'application/json'], ['/assets/gamila-regular.ttf', 'font/ttf']]) {
+      const res = await fetch(base + path);
+      assert.equal(res.status, 200, path);
+      assert.match(res.headers.get('content-type'), new RegExp(type), path);
+    }
     assert.match(await (await fetch(base + '/config.js')).text(), /window\.ARSO = .*azwo\.example/);
     assert.equal((await fetch(base + '/favicon.ico')).headers.get('content-type'), 'image/x-icon');
     assert.equal((await fetch(base + '/health')).status, 200);

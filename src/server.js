@@ -1,4 +1,4 @@
-// Static server for the ARSO site. No dependencies.
+// Static server for the ARSO site (the ARSO Claude course). No dependencies.
 // Product links and contact details come from environment variables (AZWO_URL, THEME_URL,
 // CONTACT_EMAIL, CONTACT_WHATSAPP) via /config.js, so they change in Railway without touching code.
 import { createServer } from 'node:http';
@@ -12,6 +12,7 @@ const PORT = Number(process.env.PORT || 3000);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ttf': 'font/ttf', '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
 };
 const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
