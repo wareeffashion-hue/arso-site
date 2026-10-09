@@ -311,108 +311,96 @@
     const done = completedPaths();
     if (!done.length) {
       return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>الشهادة</span><small>CERTIFICATE</small></div>
-        <h1>شهادتك<br><em>تنتظرك.</em></h1><p class="lead">أكمل كل محطات أي مسار لتحصل على شهادة إتمام من أكاديمية أرسو باسمك.</p></section>
+        <h1>شهادتك<br><em>تنتظرك.</em></h1><p class="lead">أكمل كل محطات أي مسار لتحصل على شهادة إتمام دورة احتراف كلاود من أكاديمية أرسو باسمك.</p></section>
         <ol class="timeline">${M.paths.map(p => `<li class="${pathProgress(p) ? 'next' : ''}"><span class="dot" aria-hidden="true"></span><a href="#/path/${p.id}"><small>${pathProgress(p)} من ${p.units.length} مكتملة</small><h3>${esc(p.title)}</h3></a></li>`).join('')}</ol>`;
     }
-    const chosen = done.find(p => p.id === state.path) || done[done.length - 1];
+    const design = state.certDesign === 'light' ? 'light' : 'dark';
     return `<section class="page-head"><a class="back" href="#/">→ الرئيسية</a><div class="section-meta"><span>الشهادة</span><small>CERTIFICATE OF COMPLETION</small></div>
-      <h1>أحسنت.<br><em>هذه شهادتك.</em></h1><p class="lead">اكتب اسمك كما تريده أن يظهر، ثم حمّل الشهادة صورة أو اطبعها PDF.</p></section>
+      <h1>أحسنت.<br><em>هذه شهادتك.</em></h1><p class="lead">اكتب اسمك كما تريده أن يظهر، واختر التصميم، ثم حمّل الشهادة صورة أو اطبعها PDF.</p></section>
       <section class="cert-form">
         <label>الاسم على الشهادة<input id="cert-name" maxlength="60" autocomplete="name" placeholder="اكتب اسمك الكامل" value="${esc(state.name || '')}"></label>
-        ${done.length > 1 ? `<label>المسار<select id="cert-path">${done.map(p => `<option value="${p.id}"${p.id === chosen.id ? ' selected' : ''}>${esc(p.title)}</option>`).join('')}</select></label>` : `<input type="hidden" id="cert-path" value="${chosen.id}">`}
+        <fieldset class="cert-design"><legend>التصميم</legend>
+          <label><input type="radio" name="cert-design" value="dark"${design === 'dark' ? ' checked' : ''}><span>داكن</span></label>
+          <label><input type="radio" name="cert-design" value="light"${design === 'light' ? ' checked' : ''}><span>فاتح</span></label>
+        </fieldset>
       </section>
-      <section class="cert-preview"><canvas id="cert-canvas" width="2000" height="1414" aria-label="معاينة الشهادة"></canvas></section>
+      <section class="cert-preview"><canvas id="cert-canvas" width="3200" height="2262" aria-label="معاينة الشهادة"></canvas></section>
       <section class="finish cert-actions"><button class="large-cta" id="cert-download" type="button"><span>تحميل الشهادة (PNG)</span><i aria-hidden="true">↓</i></button><button class="circle-link" id="cert-print" type="button"><span>طباعة أو حفظ PDF</span><i aria-hidden="true">⎙</i></button></section>
       <div class="print-sheet" aria-hidden="true"></div>`;
   }
 
-  let symbolImg;
-  const loadSymbol = () => symbolImg || (symbolImg = new Promise(res => { const img = new Image(); img.onload = () => res(img); img.onerror = () => res(null); img.src = 'assets/symbol.svg'; }));
+  // قالبا الشهادة مصمّمان على مساحة 1600×1131 وتُرسم الخلفية بضعف الدقة.
+  // الإحداثيات أدناه بوحدات التصميم: الاسم في مكانه المخصص، والتاريخ ورقم الشهادة فوق خطيهما.
+  const CERT_LAYOUTS = {
+    dark: { bg: 'assets/cert-dark.webp', name: { x: 1455, y: 679, size: 72, max: 740, color: '#eeeae0' }, field: { y: 955, size: 22, color: '#eeeae0' } },
+    light: { bg: 'assets/cert-light.webp', name: { x: 1465, y: 657, size: 76, max: 720, color: '#090909' }, field: { y: 937, size: 22, color: '#090909' } },
+  };
+  const bgCache = {};
+  const loadImage = src => bgCache[src] || (bgCache[src] = new Promise(res => { const img = new Image(); img.onload = () => res(img); img.onerror = () => res(null); img.src = src; }));
 
-  async function drawCertificate(canvas, { name, path, date }) {
+  async function drawCertificate(canvas, { name, date, number, design }) {
+    const L = CERT_LAYOUTS[design];
     await Promise.all([document.fonts.load('400 60px Gamila'), document.fonts.load('700 60px Gamila')]).catch(() => {});
-    const img = await loadSymbol();
+    const bg = await loadImage(L.bg);
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height, cx = W / 2;
-    const gold = '#c6a76a', paper = '#eeeae0', muted = '#8b8b82';
-    const font = (w, s) => `${w} ${s}px Gamila, Arial, sans-serif`;
-    const spaced = (text, x, y, size, color, spacing) => { ctx.save(); ctx.direction = 'ltr'; ctx.font = `${size}px Arial`; ctx.fillStyle = color; if ('letterSpacing' in ctx) ctx.letterSpacing = `${spacing}px`; ctx.textAlign = 'center'; ctx.fillText(text, x, y); ctx.restore(); };
+    const k = canvas.width / 1600;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (bg) ctx.drawImage(bg, 0, 0, canvas.width, canvas.height);
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
 
-    ctx.fillStyle = '#090909'; ctx.fillRect(0, 0, W, H);
-    const glow = ctx.createRadialGradient(cx, 380, 40, cx, 380, 900);
-    glow.addColorStop(0, '#c6a76a24'); glow.addColorStop(1, '#09090900');
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    let size = L.name.size;
+    ctx.font = `700 ${size}px Gamila, Arial, sans-serif`;
+    while (ctx.measureText(name).width > L.name.max && size > 34) { size -= 2; ctx.font = `700 ${size}px Gamila, Arial, sans-serif`; }
+    ctx.fillStyle = L.name.color;
+    ctx.fillText(name, L.name.x, L.name.y - (L.name.size - size) * 0.3);
 
-    ctx.strokeStyle = gold; ctx.lineWidth = 3; ctx.strokeRect(60, 60, W - 120, H - 120);
-    ctx.strokeStyle = '#ffffff22'; ctx.lineWidth = 1.5; ctx.strokeRect(84, 84, W - 168, H - 168);
-    ctx.fillStyle = '#55594f'; ctx.font = '34px Arial'; ctx.textAlign = 'center';
-    [[130, 140], [W - 130, 140], [130, H - 120], [W - 130, H - 120]].forEach(([x, y]) => ctx.fillText('+', x, y));
-    [[112, -1, 'ARSO — ACADEMY'], [W - 112, 1, 'WATCH / READ / BUILD']].forEach(([x, dir, t]) => { ctx.save(); ctx.translate(x, H / 2); ctx.rotate(dir * Math.PI / 2); spaced(t, 0, 6, 16, '#595d59', 6); ctx.restore(); });
-
-    if (img) ctx.drawImage(img, cx - 70, 150, 140, 140);
-    spaced('A R S O', cx, 340, 30, paper, 10);
-    spaced('THE ARSO ACADEMY · CERTIFICATE OF COMPLETION', cx, 400, 20, gold, 6);
-
-    ctx.direction = 'rtl'; ctx.textAlign = 'center';
-    ctx.fillStyle = paper; ctx.font = font(400, 128); ctx.fillText('شهادة إتمام', cx, 560);
-    ctx.fillStyle = muted; ctx.font = font(400, 40); ctx.fillText('تُمنح هذه الشهادة إلى', cx, 655);
-
-    let size = 112;
-    ctx.font = font(700, size);
-    while (ctx.measureText(name).width > 1400 && size > 54) { size -= 4; ctx.font = font(700, size); }
-    ctx.fillStyle = gold; ctx.fillText(name, cx, 800);
-    const lineW = Math.min(1500, Math.max(520, ctx.measureText(name).width + 160));
-    ctx.strokeStyle = '#c6a76a80'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx - lineW / 2, 850); ctx.lineTo(cx + lineW / 2, 850); ctx.stroke();
-
-    ctx.fillStyle = paper; ctx.font = font(400, 46); ctx.fillText(`لإتمام «${path.title}» في دورة أسرار Claude`, cx, 945);
-    ctx.fillStyle = muted; ctx.font = font(400, 32); ctx.fillText(`${path.units.length} محطات تعليمية، ونحو ${path.hours} ساعات من الدروس المتحركة والقراءة والتطبيق`, cx, 1010);
-
-    // التاريخ يميناً، والختم في الوسط، والتوقيع يساراً.
-    const by = 1200;
-    ctx.fillStyle = muted; ctx.font = font(400, 26); ctx.fillText('تاريخ الإتمام', 1560, by - 52);
-    ctx.fillStyle = paper; ctx.font = font(400, 38); ctx.fillText(certDate.format(date), 1560, by);
-    ctx.fillStyle = muted; ctx.font = font(400, 26); ctx.fillText('أكاديمية أرسو', 440, by - 52);
-    ctx.fillStyle = paper; ctx.font = font(700, 44); ctx.fillText('أرسو', 440, by);
-    ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1.5;
-    [[1560], [440]].forEach(([x]) => { ctx.beginPath(); ctx.moveTo(x - 190, by + 30); ctx.lineTo(x + 190, by + 30); ctx.stroke(); });
-
-    ctx.strokeStyle = gold; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cx, by - 30, 92, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = '#c6a76a60'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, by - 30, 78, 0, Math.PI * 2); ctx.stroke();
-    if (img) ctx.drawImage(img, cx - 36, by - 92, 72, 72);
-    spaced('CERTIFIED', cx, by + 14, 12, gold, 4);
-
-    ctx.direction = 'rtl'; ctx.fillStyle = '#6b6b64'; ctx.font = font(400, 22);
-    ctx.fillText('دورة مستقلة من أرسو، وليست صادرة عن Anthropic.', cx, H - 110);
+    ctx.font = `400 ${L.field.size}px Gamila, Arial, sans-serif`;
+    ctx.fillStyle = L.field.color;
+    ctx.fillText(certDate.format(date), design === 'dark' ? 1460 : 1465, L.field.y);
+    ctx.direction = 'ltr';
+    ctx.fillText(number, 1180, L.field.y);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   function initCertificate() {
     const canvas = view.querySelector('#cert-canvas');
     if (!canvas) return;
     const nameInput = view.querySelector('#cert-name');
-    const pathInput = view.querySelector('#cert-path');
-    state.cert = state.cert || {};
-    const current = () => {
-      const path = M.paths.find(p => p.id === pathInput.value);
-      if (!state.cert[path.id]) { state.cert[path.id] = new Date().toISOString(); save(); }
-      return { name: nameInput.value.trim() || 'اسم المتدرب', path, date: new Date(state.cert[path.id]) };
-    };
+    // التاريخ يُثبَّت عند أول فتح للشهادة بعد إكمال مسار، والرقم يُولَّد مرة واحدة لكل متدرب.
+    if (!state.certDate) state.certDate = new Date().toISOString();
+    if (!state.certNo) {
+      const rand = Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 6).toUpperCase();
+      state.certNo = `ARSO-${new Date(state.certDate).getFullYear()}-${rand}`;
+    }
+    save();
+    const current = () => ({
+      name: nameInput.value.trim() || 'اسم المتدرب',
+      date: new Date(state.certDate),
+      number: state.certNo,
+      design: state.certDesign === 'light' ? 'light' : 'dark',
+    });
     const redraw = () => drawCertificate(canvas, current());
     nameInput.addEventListener('input', () => { state.name = nameInput.value.trim(); save(); redraw(); });
-    pathInput.addEventListener('change', redraw);
+    view.querySelectorAll('input[name="cert-design"]').forEach(r => r.addEventListener('change', () => { state.certDesign = r.value; save(); redraw(); }));
+    const needName = () => {
+      if (nameInput.value.trim()) { nameInput.removeAttribute('aria-invalid'); return false; }
+      nameInput.focus(); nameInput.setAttribute('aria-invalid', 'true'); return true;
+    };
     view.querySelector('#cert-download').addEventListener('click', async () => {
-      if (!nameInput.value.trim()) { nameInput.focus(); nameInput.setAttribute('aria-invalid', 'true'); return; }
-      nameInput.removeAttribute('aria-invalid');
+      if (needName()) return;
       await redraw();
       canvas.toBlob(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `ARSO-Certificate-${current().path.id}.png`;
+        a.download = `ARSO-Claude-Certificate-${state.certNo}.png`;
         document.body.append(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       }, 'image/png');
     });
     view.querySelector('#cert-print').addEventListener('click', async () => {
-      if (!nameInput.value.trim()) { nameInput.focus(); nameInput.setAttribute('aria-invalid', 'true'); return; }
+      if (needName()) return;
       await redraw();
       const sheet = view.querySelector('.print-sheet');
       sheet.innerHTML = `<img alt="" src="${canvas.toDataURL('image/png')}">`;

@@ -269,6 +269,11 @@ footer a:hover{color:var(--gold)}
 .cert-form input,.cert-form select{background:#0f0f0e;border:1px solid var(--line);color:var(--paper);padding:14px 16px;font-size:17px;border-radius:0;outline:none;transition:border-color .3s}
 .cert-form input:focus,.cert-form select:focus{border-color:var(--gold)}
 .cert-form input[aria-invalid=true]{border-color:#a05a4f}
+.cert-design{border:0;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px;flex:none;align-items:center}
+.cert-design legend{font-size:12px;color:var(--gold);padding:0;margin-bottom:8px}
+.cert-design label{display:inline-flex;align-items:center;gap:10px;border:1px solid var(--line);padding:13px 18px;margin-left:8px;font-size:15px;color:var(--paper);cursor:pointer;min-width:0;transition:border-color .3s,background .3s}
+.cert-design input{accent-color:var(--gold)}
+.cert-design label:has(input:checked){border-color:var(--gold);background:#c6a76a14}
 .cert-preview{max-width:1000px}
 .cert-preview canvas{width:100%;height:auto;display:block;border:1px solid var(--line);box-shadow:0 40px 80px -30px #000}
 .cert-actions{max-width:1000px}
